@@ -419,8 +419,11 @@ class IccCameraChain():
         self.camList = []
         for camNr in range(0, chainConfig.numCameras()):
             camConfig = chainConfig.getCameraParameters(camNr)
-            dataset = initCameraBagDataset(parsed.bagfile[0], camConfig.getRosTopic(), \
-                                           parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
+            dataset = (kc.EurocImageDatasetReader(parsed.euroc, parsed.euroc_cams[camNr],
+                       camConfig.getRosTopic(), camConfig.getResolution(), parsed.bag_from_to, parsed.bag_freq)
+                       if getattr(parsed, 'euroc', None) else
+                       initCameraBagDataset(parsed.bagfile[0], camConfig.getRosTopic(),
+                                            parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization))
             
             #create the camera
             self.camList.append( IccCamera( camConfig, 
@@ -590,8 +593,11 @@ class IccImu(object):
         self.imuConfig = self.ImuParameters(imuConfig, imuNr)
 
         #load dataset
-        self.dataset = initImuBagDataset(parsed.bagfile[0], imuConfig.getRosTopic(), \
-                                         parsed.bag_from_to, parsed.perform_synchronization)
+        self.dataset = (kc.EurocImuDatasetReader(parsed.euroc, parsed.euroc_imus[imuNr],
+                            imuConfig.getRosTopic(), parsed.bag_from_to)
+                            if getattr(parsed, 'euroc', None) else
+                            initImuBagDataset(parsed.bagfile[0], imuConfig.getRosTopic(),
+                                              parsed.bag_from_to, parsed.perform_synchronization))
         
         #statistics
         self.accelUncertaintyDiscrete, self.accelRandomWalk, self.accelUncertainty = self.imuConfig.getAccelerometerStatistics()

@@ -67,9 +67,14 @@ def parseArgs():
     
     #data source
     groupData = parser.add_argument_group('Dataset source')
-    groupData.add_argument('--bag', dest='bagfile', nargs=1, help='Ros bag file containing image and imu data (rostopics specified in the yamls)', action=Once, required=True)
-    groupData.add_argument('--bag-from-to', metavar='bag_from_to', type=float, nargs=2, help='Use the bag data starting from up to this time [s]')
-    groupData.add_argument('--bag-freq', metavar='bag_freq', type=float, help='Frequency to extract features at [hz]')
+    source = groupData.add_mutually_exclusive_group(required=True)
+    source.add_argument('--euroc', help='EuRoC sequence root or mav0 directory')
+    groupData.add_argument('--euroc-cams', nargs='+', help='Physical camera directories in camchain order')
+    groupData.add_argument('--euroc-imus', nargs='+', help='IMU directories in configuration order')
+    groupData.add_argument('--output-prefix', help='Output filename prefix (required for EuRoC)')
+    source.add_argument('--bag', dest='bagfile', nargs=1, help='Ros bag file containing image and imu data (rostopics specified in the yamls)', action=Once)
+    groupData.add_argument('--bag-from-to', metavar='bag_from_to', type=float, nargs=2, help='Use bag or EuRoC data in this inclusive interval relative to each stream start [s]')
+    groupData.add_argument('--bag-freq', metavar='bag_freq', type=float, help='Maximum feature extraction frequency for bag or EuRoC [hz]')
     groupData.add_argument('--perform-synchronization',  action='store_true', dest='perform_synchronization', \
                           help='Perform a clock synchronization according to \'Clock synchronization algorithms for network measurements\' by Zhang et al. (2002).')
     
@@ -115,6 +120,33 @@ def parseArgs():
     except:
         sys.exit(2)
                  
+    if parsed.euroc:
+        if not all([parsed.euroc_cams, parsed.euroc_imus, parsed.output_prefix, parsed.chain_yaml]):
+            parser.error('EuRoC requires --euroc-cams, --euroc-imus, --output-prefix and --cams')
+        if any(not name.startswith('cam') for name in parsed.euroc_cams) or any(not name.startswith('imu') for name in parsed.euroc_imus):
+            parser.error('Camera mappings must name camN and IMU mappings imuN')
+        for name in parsed.euroc_cams + parsed.euroc_imus:
+            kc.sensor_directory(parsed.euroc, name)
+        root = os.path.realpath(parsed.euroc)
+        prefix = os.path.realpath(parsed.output_prefix)
+        if os.path.commonpath([root, prefix]) == root:
+            parser.error('Output prefix must be outside the EuRoC input directory')
+        if not os.path.isdir(os.path.dirname(prefix)):
+            parser.error('Output directory does not exist')
+        suffixes = ['-camchain-imucam.yaml', '-imu.yaml', '-results-imucam.txt', '-report-imucam.pdf', '-poses-imucam-imu0.csv']
+        if any(os.path.exists(prefix + suffix) for suffix in suffixes):
+            parser.error('Output already exists; choose a fresh prefix')
+        if parsed.perform_synchronization:
+            parser.error('EuRoC has no receive timestamps for --perform-synchronization')
+        if len(parsed.euroc_imus) != len(parsed.imu_yamls):
+            parser.error('EuRoC IMU mapping must match IMU configurations')
+        if len(parsed.euroc_cams) != kc.CameraChainParameters(parsed.chain_yaml).numCameras():
+            parser.error('EuRoC camera mapping must match camchain')
+        if len(set(parsed.euroc_cams)) != len(parsed.euroc_cams) or len(set(parsed.euroc_imus)) != len(parsed.euroc_imus):
+            parser.error('Duplicate EuRoC sensor mapping')
+    elif parsed.euroc_cams or parsed.euroc_imus:
+        parser.error('EuRoC mappings require --euroc')
+
     if parsed.verbose:
         parsed.showextraction = True             
     
@@ -215,7 +247,7 @@ def main():
     util.printResults(iCal, withCov=parsed.recover_cov)
     print("")
 
-    bagtag = os.path.splitext(parsed.bagfile[0])[0]
+    bagtag = parsed.output_prefix or os.path.splitext(parsed.bagfile[0])[0]
     yamlFilename = bagtag + "-camchain-imucam.yaml"
     iCal.saveCamChainParametersYaml(yamlFilename)
     print("Results written to:")
